@@ -3,6 +3,7 @@ const fs = require("fs");
 const path = require("path");
 const { URL } = require("url");
 const { getVolumeState, setVolumeLevel, setMuteState } = require("./src/audio");
+const { authorizeRequest, getLanAddresses } = require("./src/network");
 
 const HOST = process.env.HOST || "0.0.0.0";
 const PORT = Number(process.env.PORT || 3000);
@@ -152,6 +153,26 @@ async function handleApi(request, response, url) {
 const server = http.createServer(async (request, response) => {
   const url = new URL(request.url, `http://${request.headers.host || "localhost"}`);
 
+  try {
+    const authorization = await authorizeRequest(request);
+
+    if (!authorization.allowed) {
+      sendJson(response, 403, {
+        error: "Access denied",
+        detail: authorization.reason,
+        ipAddress: authorization.ipAddress,
+        macAddress: authorization.macAddress
+      });
+      return;
+    }
+  } catch (error) {
+    sendJson(response, 500, {
+      error: "Failed to validate device access",
+      detail: error.message
+    });
+    return;
+  }
+
   if (url.pathname.startsWith("/api/")) {
     await handleApi(request, response, url);
     return;
@@ -167,4 +188,16 @@ const server = http.createServer(async (request, response) => {
 
 server.listen(PORT, HOST, () => {
   console.log(`AudioDeck listening on http://${HOST}:${PORT}`);
+
+  const lanAddresses = getLanAddresses(PORT);
+
+  if (lanAddresses.length > 0) {
+    console.log("LAN access URLs:");
+
+    for (const address of lanAddresses) {
+      console.log(`  ${address}`);
+    }
+  } else {
+    console.log("No LAN IPv4 addresses were detected.");
+  }
 });
