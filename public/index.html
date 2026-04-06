@@ -9,18 +9,29 @@
   <body>
     <main class="app-shell">
       <section class="panel">
-        <h1>AudioDeck</h1>
+        <section class="mix-panel" aria-label="Master volume controls">
+          <div class="status-row">
+            <div>
+              <span class="label">Master output</span>
+              <strong id="volumeValue">--%</strong>
+            </div>
 
-        <div class="status-row">
-          <div>
-            <span class="label">Current volume</span>
-            <strong id="volumeValue">--%</strong>
+            <button id="muteButton" type="button">Mute</button>
           </div>
-          <button id="muteButton" type="button">Mute</button>
-        </div>
 
-        <label class="slider-label" for="volumeSlider">Master volume</label>
-        <input id="volumeSlider" type="range" min="0" max="100" value="0">
+          <div class="slider-shell">
+            <div class="slider-topline">
+              <label class="slider-label" for="volumeSlider">Mixtape fader</label>
+              <span class="slider-hint">Drag for live volume</span>
+            </div>
+
+            <div class="slider-lane">
+              <span class="slider-mark">00</span>
+              <input id="volumeSlider" type="range" min="0" max="100" value="0" aria-label="Master volume">
+              <span class="slider-mark">100</span>
+            </div>
+          </div>
+        </section>
 
         <p id="message" class="message" aria-live="polite"></p>
       </section>
