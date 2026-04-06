@@ -4,6 +4,8 @@ const path = require("path");
 const { runPowerShell } = require("./powershell");
 
 const whitelistPath = path.join(__dirname, "..", "config", "whitelist.json");
+const AUTHORIZATION_CACHE_TTL_MS = 5 * 60 * 1000;
+const authorizationCache = new Map();
 
 function getLanAddresses(port) {
   const interfaces = os.networkInterfaces();
@@ -60,6 +62,49 @@ function isLocalAddress(ipAddress) {
   return ipAddress === "127.0.0.1" || ipAddress === "::1";
 }
 
+function getCacheKey(ipAddress) {
+  return normalizeIp(ipAddress);
+}
+
+function getCachedAuthorization(ipAddress, whitelist) {
+  const cacheKey = getCacheKey(ipAddress);
+  const cachedEntry = authorizationCache.get(cacheKey);
+
+  if (!cachedEntry) {
+    return null;
+  }
+
+  if (cachedEntry.expiresAt <= Date.now()) {
+    authorizationCache.delete(cacheKey);
+    return null;
+  }
+
+  if (cachedEntry.whitelistEnabled !== whitelist.enabled) {
+    authorizationCache.delete(cacheKey);
+    return null;
+  }
+
+  if (cachedEntry.whitelistSignature !== getWhitelistSignature(whitelist)) {
+    authorizationCache.delete(cacheKey);
+    return null;
+  }
+
+  return cachedEntry.authorization;
+}
+
+function setCachedAuthorization(ipAddress, whitelist, authorization) {
+  authorizationCache.set(getCacheKey(ipAddress), {
+    authorization,
+    expiresAt: Date.now() + AUTHORIZATION_CACHE_TTL_MS,
+    whitelistEnabled: whitelist.enabled,
+    whitelistSignature: getWhitelistSignature(whitelist)
+  });
+}
+
+function getWhitelistSignature(whitelist) {
+  return Array.from(whitelist.allowedMacs).sort().join(",");
+}
+
 async function lookupMacAddress(ipAddress) {
   const normalizedIp = normalizeIp(ipAddress);
 
@@ -95,32 +140,47 @@ async function authorizeRequest(request) {
     };
   }
 
+  const cachedAuthorization = getCachedAuthorization(ipAddress, whitelist);
+
+  if (cachedAuthorization) {
+    return cachedAuthorization;
+  }
+
   const macAddress = await lookupMacAddress(ipAddress);
   const normalizedMac = normalizeMac(macAddress);
 
   if (!normalizedMac) {
-    return {
+    const authorization = {
       allowed: false,
       ipAddress,
       macAddress: null,
       reason: "Could not resolve device MAC address from its IP."
     };
+
+    setCachedAuthorization(ipAddress, whitelist, authorization);
+    return authorization;
   }
 
   if (!whitelist.allowedMacs.has(normalizedMac)) {
-    return {
+    const authorization = {
       allowed: false,
       ipAddress,
       macAddress,
       reason: "Device MAC address is not in the whitelist."
     };
+
+    setCachedAuthorization(ipAddress, whitelist, authorization);
+    return authorization;
   }
 
-  return {
+  const authorization = {
     allowed: true,
     ipAddress,
     macAddress
   };
+
+  setCachedAuthorization(ipAddress, whitelist, authorization);
+  return authorization;
 }
 
 module.exports = {

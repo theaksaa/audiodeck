@@ -2,7 +2,12 @@ const http = require("http");
 const fs = require("fs");
 const path = require("path");
 const { URL } = require("url");
-const { getVolumeState, setVolumeLevel, setMuteState } = require("./src/audio");
+const {
+  closeAudioWorker,
+  getVolumeState,
+  setVolumeLevel,
+  setMuteState
+} = require("./src/audio");
 const { authorizeRequest, getLanAddresses } = require("./src/network");
 
 const HOST = process.env.HOST || "0.0.0.0";
@@ -200,4 +205,18 @@ server.listen(PORT, HOST, () => {
   } else {
     console.log("No LAN IPv4 addresses were detected.");
   }
+});
+
+function shutdown() {
+  closeAudioWorker();
+}
+
+process.on("exit", shutdown);
+process.on("SIGINT", () => {
+  shutdown();
+  process.exit(0);
+});
+process.on("SIGTERM", () => {
+  shutdown();
+  process.exit(0);
 });

@@ -9,15 +9,13 @@ let currentState = {
 };
 
 let refreshTimer = null;
-let volumeUpdateTimer = null;
-let volumeRequestId = 0;
-let latestAppliedRequestId = 0;
 let isDraggingSlider = false;
-let interactionLockUntil = 0;
 let displayedVolume = 0;
-let volumeAnimationFrame = null;
-let volumeAnimationToken = 0;
 let pendingVolumeLevel = null;
+let latestVolumeIntent = null;
+let latestSentVolumeRequestId = 0;
+let latestAppliedVolumeRequestId = 0;
+let volumeSendFrame = null;
 
 function clampVolume(level) {
   return Math.max(0, Math.min(100, Number(level) || 0));
@@ -36,71 +34,28 @@ function applyDisplayedVolume(level) {
   volumeValue.textContent = `${Math.round(nextLevel)}%`;
 }
 
-function stopVolumeAnimation() {
-  if (volumeAnimationFrame !== null) {
-    window.cancelAnimationFrame(volumeAnimationFrame);
-    volumeAnimationFrame = null;
-  }
-}
-
-function animateDisplayedVolume(targetLevel) {
-  const nextTarget = clampVolume(targetLevel);
-  const distance = Math.abs(nextTarget - displayedVolume);
-
-  if (distance < 0.5) {
-    stopVolumeAnimation();
-    applyDisplayedVolume(nextTarget);
-    return;
-  }
-
-  const animationToken = ++volumeAnimationToken;
-  const startLevel = displayedVolume;
-  const startTime = Date.now();
-  const duration = Math.min(420, Math.max(160, distance * 10));
-
-  stopVolumeAnimation();
-
-  function tick() {
-    if (animationToken !== volumeAnimationToken || isDraggingSlider || isInteractionLocked()) {
-      return;
-    }
-
-    const elapsed = Date.now() - startTime;
-    const progress = Math.min(1, elapsed / duration);
-    const easedProgress = 1 - Math.pow(1 - progress, 3);
-    const nextLevel = startLevel + ((nextTarget - startLevel) * easedProgress);
-
-    applyDisplayedVolume(nextLevel);
-
-    if (progress < 1) {
-      volumeAnimationFrame = window.requestAnimationFrame(tick);
-      return;
-    }
-
-    volumeAnimationFrame = null;
-    applyDisplayedVolume(nextTarget);
-  }
-
-  volumeAnimationFrame = window.requestAnimationFrame(tick);
-}
-
-function lockInteractions(duration = 700) {
-  interactionLockUntil = Date.now() + duration;
-}
-
-function isInteractionLocked() {
-  return Date.now() < interactionLockUntil;
-}
-
 function showMessage(text, isError = false) {
   message.textContent = text;
   message.dataset.state = isError ? "error" : "ok";
 }
 
+function hasPendingVolumeWork() {
+  return pendingVolumeLevel !== null;
+}
+
+function renderMuteState(muted) {
+  currentState = {
+    ...currentState,
+    muted
+  };
+  muteButton.textContent = muted ? "Unmute" : "Mute";
+  document.body.dataset.muted = String(muted);
+}
+
 function renderState(state) {
   currentState = state;
 
-  if (!isDraggingSlider && !isInteractionLocked()) {
+  if (!isDraggingSlider) {
     applyDisplayedVolume(state.volume);
   }
 
@@ -109,6 +64,10 @@ function renderState(state) {
 }
 
 async function loadState(showStatus = false) {
+  if (!showStatus && (isDraggingSlider || hasPendingVolumeWork())) {
+    return;
+  }
+
   try {
     const response = await fetch("/api/volume", { cache: "no-store" });
     const state = await response.json();
@@ -121,38 +80,21 @@ async function loadState(showStatus = false) {
       return;
     }
 
-    if (pendingVolumeLevel !== null) {
-      if (state.volume === pendingVolumeLevel) {
+    if (hasPendingVolumeWork()) {
+      if (pendingVolumeLevel !== null && state.volume === pendingVolumeLevel) {
         pendingVolumeLevel = null;
       } else if (!showStatus) {
-        currentState = {
-          ...currentState,
-          muted: state.muted
-        };
-        muteButton.textContent = state.muted ? "Unmute" : "Mute";
-        document.body.dataset.muted = String(state.muted);
+        renderMuteState(state.muted);
         return;
       }
     }
 
-    if (isDraggingSlider || isInteractionLocked()) {
-      currentState = {
-        ...currentState,
-        muted: state.muted
-      };
-      muteButton.textContent = state.muted ? "Unmute" : "Mute";
-      document.body.dataset.muted = String(state.muted);
+    if (isDraggingSlider) {
+      renderMuteState(state.muted);
       return;
     }
 
-    if (!showStatus && state.volume !== displayedVolume) {
-      currentState = state;
-      muteButton.textContent = state.muted ? "Unmute" : "Mute";
-      document.body.dataset.muted = String(state.muted);
-      animateDisplayedVolume(state.volume);
-    } else {
-      renderState(state);
-    }
+    renderState(state);
 
     if (showStatus) {
       showMessage("");
@@ -163,10 +105,8 @@ async function loadState(showStatus = false) {
 }
 
 async function updateVolume(level) {
-  const requestId = ++volumeRequestId;
   const normalizedLevel = clampVolume(level);
-  pendingVolumeLevel = normalizedLevel;
-  lockInteractions();
+  const requestId = ++latestSentVolumeRequestId;
 
   try {
     const response = await fetch("/api/volume", {
@@ -182,18 +122,30 @@ async function updateVolume(level) {
       throw new Error(state.error || "Failed to update volume");
     }
 
-    if (requestId < latestAppliedRequestId) {
+    if (requestId < latestAppliedVolumeRequestId) {
       return;
     }
 
-    latestAppliedRequestId = requestId;
-    if (state.volume === pendingVolumeLevel) {
+    latestAppliedVolumeRequestId = requestId;
+
+    if (pendingVolumeLevel !== null && state.volume === pendingVolumeLevel) {
       pendingVolumeLevel = null;
     }
+
+    if (latestVolumeIntent !== null && state.volume !== latestVolumeIntent) {
+      renderMuteState(state.muted);
+      showMessage("");
+      return;
+    }
+
+    latestVolumeIntent = null;
     renderState(state);
     showMessage("");
   } catch (error) {
-    pendingVolumeLevel = null;
+    if (requestId === latestSentVolumeRequestId) {
+      pendingVolumeLevel = null;
+      latestVolumeIntent = null;
+    }
     showMessage(error.message, true);
   }
 }
@@ -221,26 +173,30 @@ async function updateMute(muted) {
 }
 
 function queueVolumeUpdate(level) {
-  if (volumeUpdateTimer !== null) {
-    window.clearTimeout(volumeUpdateTimer);
+  const normalizedLevel = clampVolume(level);
+  latestVolumeIntent = normalizedLevel;
+  pendingVolumeLevel = normalizedLevel;
+
+  if (volumeSendFrame !== null) {
+    return;
   }
 
-  volumeUpdateTimer = window.setTimeout(() => {
-    volumeUpdateTimer = null;
-    updateVolume(level);
-  }, 90);
+  volumeSendFrame = window.requestAnimationFrame(() => {
+    volumeSendFrame = null;
+    updateVolume(latestVolumeIntent);
+  });
 }
 
 function startSliderInteraction() {
   isDraggingSlider = true;
-  volumeAnimationToken += 1;
-  stopVolumeAnimation();
-  lockInteractions();
 }
 
 function endSliderInteraction() {
   isDraggingSlider = false;
-  lockInteractions();
+
+  if (pendingVolumeLevel !== null) {
+    applyDisplayedVolume(pendingVolumeLevel);
+  }
 }
 
 volumeSlider.addEventListener("pointerdown", startSliderInteraction);
@@ -254,7 +210,6 @@ window.addEventListener("touchcancel", endSliderInteraction, { passive: true });
 
 volumeSlider.addEventListener("input", () => {
   const level = clampVolume(volumeSlider.value);
-  lockInteractions();
   applyDisplayedVolume(level);
   pendingVolumeLevel = level;
   currentState = {
@@ -266,7 +221,6 @@ volumeSlider.addEventListener("input", () => {
 
 volumeSlider.addEventListener("change", () => {
   isDraggingSlider = false;
-  lockInteractions();
 });
 
 muteButton.addEventListener("click", () => {
@@ -284,9 +238,7 @@ window.addEventListener("beforeunload", () => {
     window.clearInterval(refreshTimer);
   }
 
-  if (volumeUpdateTimer !== null) {
-    window.clearTimeout(volumeUpdateTimer);
+  if (volumeSendFrame !== null) {
+    window.cancelAnimationFrame(volumeSendFrame);
   }
-
-  stopVolumeAnimation();
 });
