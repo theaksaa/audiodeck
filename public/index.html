@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>AudioDeck</title>
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body>
+    <main class="app-shell">
+      <section class="panel">
+        <h1>AudioDeck</h1>
+
+        <div class="status-row">
+          <div>
+            <span class="label">Current volume</span>
+            <strong id="volumeValue">--%</strong>
+          </div>
+          <button id="muteButton" type="button">Mute</button>
+        </div>
+
+        <label class="slider-label" for="volumeSlider">Master volume</label>
+        <input id="volumeSlider" type="range" min="0" max="100" value="0">
+
+        <p id="message" class="message" aria-live="polite"></p>
+      </section>
+    </main>
+
+    <script src="/app.js" defer></script>
+  </body>
+  </html>

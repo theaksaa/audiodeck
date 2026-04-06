@@ -1,0 +1,16 @@
+{
+  "name": "audiodeck",
+  "version": "0.1.0",
+  "description": "LAN web app for controlling Windows audio",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "keywords": [
+    "audio",
+    "windows",
+    "volume",
+    "lan"
+  ],
+  "license": "MIT"
+}
